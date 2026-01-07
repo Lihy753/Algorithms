@@ -66,8 +66,8 @@ void tarjan_undirected()
             if (f.ei < (int)G[u].size())
             {
                 auto tmp = G[u][f.ei++];
-                auto v = tmp.id;
-                auto eid = tmp.to;
+                int v   = tmp.to;
+                int eid = tmp.id;
 
                 if (eid == f.parent_eid)
                     continue;
@@ -133,8 +133,8 @@ void build_ebcc()
             int u = st.top(); st.pop();
             for (auto& tmp : G[u])
             {
-                const auto& v = tmp.id;
-                const auto& eid = tmp.to;
+                const auto& v = tmp.to;
+                const auto& eid = tmp.id;
                 if (is_bridge[eid]) continue;
                 if (ebcc_id[v] == -1)
                 {
@@ -158,8 +158,8 @@ void build_block_graph()
     {
         for (auto& tmp : G[u])
         {
-            const auto& v = tmp.id;
-            const auto& eid = tmp.to;
+            const auto& v = tmp.to;
+            const auto& eid = tmp.id;
             if (is_bridge[eid])
             {
                 int a = ebcc_id[u];
