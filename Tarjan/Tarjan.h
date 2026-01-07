@@ -98,7 +98,8 @@ void tarjan_undirected()
                         is_bridge[f.parent_eid] = true;
 
                     // 割点（非根）
-                    if (low[u] >= dfn[parent])
+                    Frame &pf = st.top();
+                    if (pf.parent_eid != -1 && low[u] >= dfn[parent])
                         is_cut[parent] = true;
                 }
                 else
