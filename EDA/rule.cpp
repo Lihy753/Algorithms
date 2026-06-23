@@ -3,7 +3,7 @@
 #include <string>
 #include <stdexcept>
 #include <cctype>
-
+、、、、
 // ==========================================
 // 1. 数据结构定义 (Data Structures)
 // ==========================================
@@ -23,19 +23,26 @@ enum class RuleBranch {
     CONVEX        // 分支 C: 凸角与台阶 (CONVEXCORNERS ...)
 };
 
-class Lef58EnclosureEdgeRule {
+// ==========================================
+// 1. 单条规则语句的数据结构 (Single Statement)
+// ==========================================
+class Lef58EnclosureEdgeStatement {
 public:
-    // --- 基础公共属性 (Base Headers) ---
-    std::string cutClass = "";      // 过孔类名，如果为空则代表无限制
+    // --- 基础公共属性 ---
+    std::string cutClass = "";      
     LayerMode layerMode = LayerMode::BOTH;
-    double overhang = 0.0;          // 核心要求的包围量
+    double overhang = 0.0;          
 
     // 分支判定类型
     RuleBranch branchType = RuleBranch::UNSET;
 
-    // --- 分支 A: OPPOSITE / WRONGDIRECTION ---
-    bool isWrongDirection = false;
-    bool hasOpposite = false;
+    // --- 分支 A 属性 (总开关: OPPOSITE) ---
+    bool hasOpposite = false;      // 只要进入分支A，此项必然为 true
+    
+    // OPPOSITE 下的内层互斥子分支 1: 强制非首选方向约束
+    bool isWrongDirection = false; 
+    
+    // OPPOSITE 下的内层互斥子分支 2: 对称方向防护 (可附带以下可选条件)
     bool hasExceptEol = false;
     double exceptEolWidth = 0.0;
     bool hasNoConcaveCorner = false;
@@ -45,179 +52,148 @@ public:
     bool hasAboveMetal = false;
     double aboveMetalExtension = 0.0;
 
-    // --- 分支 B: 经典邻域干涉 (Proximity) ---
+    // --- 分支 B 属性 ---
     bool hasIncludeCorner = false;
-    bool useSpanLength = false;     // false = WIDTH, true = SPANLENGTH
+    bool useSpanLength = false;     
     bool hasBothWire = false;
-    double minSize = 0.0;           // minWidth 或 minSpanLength
-    double maxSize = -1.0;          // maxWidth 或 maxSpanLength (-1 表示无上限)
-    
+    double minSize = 0.0;           
+    double maxSize = -1.0;          
     bool hasParallel = false;
     double parallelLength = 0.0;
-    
     double minWithin = 0.0;
-    double maxWithin = -1.0;        // 如果仅提供了单值，则范围是 [0, maxWithin)
-
+    double maxWithin = -1.0;        
     bool hasExceptExtraCut = false;
     double extraCutWithin = -1.0;
     bool hasExceptTwoEdges = false;
     double exceptTwoEdgesWithin = -1.0;
 
-    // --- 分支 C: 凸角与台阶 (Convex) ---
+    // --- 分支 C 属性 ---
     bool hasConvexCorners = false;
     double convexLength = 0.0;
     double adjacentLength = 0.0;
     double convexParWithin = 0.0;
     double convexParLength = 0.0;
+};
 
-    // ==========================================
-    // 2. 解析器方法 (Parser Method)
-    // ==========================================
-    
-    // 核心装载函数：将 vector<string> strs 的信息存入 Class 中
-    bool buildFromTokens(const std::vector<std::string>& tokens) {
-        if (tokens.empty() || tokens[0] != "ENCLOSUREEDGE") return false;
+// ==========================================
+// 2. 整个属性的管理者类 (The Property Container)
+// ==========================================
+class Lef58EnclosureEdgeProperty {
+public:
+    // 核心序列：这里完美解决了你说的“能出现很多次”的问题！
+    std::vector<Lef58EnclosureEdgeStatement> statements;
 
-        bool overhangParsed = false; // 用于标记是否已经解析到了基准 overhang 数值
+    // 状态机解析器：负责遍历你的 vector<string> strs
+    bool parseTokens(const std::vector<std::string>& tokens) {
+        if (tokens.empty()) return false;
 
-        for (size_t i = 1; i < tokens.size(); ++i) {
+        Lef58EnclosureEdgeStatement currentStmt;
+        bool inStatement = false;
+        bool overhangParsed = false;
+
+        for (size_t i = 0; i < tokens.size(); ++i) {
             const std::string& t = tokens[i];
 
-            // -- 公共头部解析 --
-            if (t == "CUTCLASS") {
-                if (i + 1 < tokens.size()) cutClass = tokens[++i];
+            // 遇到 ENCLOSUREEDGE 关键字，代表一个新语句（序列元素）的开始
+            if (t == "ENCLOSUREEDGE") {
+                currentStmt = Lef58EnclosureEdgeStatement(); // 初始化一个干净的新对象
+                inStatement = true;
+                overhangParsed = false;
+                continue;
+            }
+
+            // 遇到分号 ; 代表当前语句结束，将其塞入序列并准备迎接下一个
+            if (t == ";") {
+                if (inStatement) {
+                    statements.push_back(currentStmt);
+                    inStatement = false;
+                }
+                continue;
+            }
+
+            // 如果不在任何语句解析状态中，忽略杂音
+            if (!inStatement) continue;
+
+            // --- 下面就是单纯给 currentStmt 填值的逻辑 ---
+            if (t == "CUTCLASS" && i + 1 < tokens.size()) {
+                currentStmt.cutClass = tokens[++i];
             } else if (t == "ABOVE") {
-                layerMode = LayerMode::ABOVE;
+                currentStmt.layerMode = LayerMode::ABOVE;
             } else if (t == "BELOW") {
-                layerMode = LayerMode::BELOW;
-            } 
-            // 匹配悬空数字（通常就是 overhang 参数）
-            else if (!overhangParsed && isNumber(t)) {
-                overhang = std::stod(t);
+                currentStmt.layerMode = LayerMode::BELOW;
+            } else if (!overhangParsed && isNumber(t)) {
+                currentStmt.overhang = std::stod(t);
                 overhangParsed = true;
             }
-            // -- 分支 A 解析 --
+            // 分支 A: 必须以 OPPOSITE 为大前提
             else if (t == "OPPOSITE") {
-                branchType = RuleBranch::OPPOSITE_DIR;
-                hasOpposite = true;
+                currentStmt.branchType = RuleBranch::OPPOSITE_DIR;
+                currentStmt.hasOpposite = true;
             } else if (t == "WRONGDIRECTION") {
-                branchType = RuleBranch::OPPOSITE_DIR;
-                isWrongDirection = true;
-            } else if (t == "EXCEPTEOL") {
-                hasExceptEol = true;
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) exceptEolWidth = std::stod(tokens[++i]);
-            } else if (t == "NOCONCAVECORNER") {
-                hasNoConcaveCorner = true;
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) noConcaveWithin = std::stod(tokens[++i]);
-            } else if (t == "CUTTOBELOWSPACING") {
-                hasCutToBelowSpacing = true;
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) cutToBelowSpacing = std::stod(tokens[++i]);
-            } else if (t == "ABOVEMETAL") {
-                hasAboveMetal = true;
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) aboveMetalExtension = std::stod(tokens[++i]);
+                // 这是隶属于 OPPOSITE 的子选项
+                currentStmt.isWrongDirection = true;
+            } else if (t == "EXCEPTEOL" && i + 1 < tokens.size() && isNumber(tokens[i+1])) {
+                currentStmt.hasExceptEol = true;
+                currentStmt.exceptEolWidth = std::stod(tokens[++i]);
             }
-            // -- 分支 B 解析 --
-            else if (t == "INCLUDECORNER") {
-                hasIncludeCorner = true;
-            } else if (t == "WIDTH" || t == "SPANLENGTH") {
-                branchType = RuleBranch::PROXIMITY;
-                useSpanLength = (t == "SPANLENGTH");
-                
-                // 向前看 (Look-ahead) 判定是否有 BOTHWIRE
+            // 分支 B
+            else if (t == "WIDTH" || t == "SPANLENGTH") {
+                currentStmt.branchType = RuleBranch::PROXIMITY;
+                currentStmt.useSpanLength = (t == "SPANLENGTH");
                 if (i + 1 < tokens.size() && tokens[i+1] == "BOTHWIRE") {
-                    hasBothWire = true;
-                    i++;
+                    currentStmt.hasBothWire = true; i++;
                 }
-                
-                // 必定有一个 min 值
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) minSize = std::stod(tokens[++i]);
-                
-                // 尝试再向前看一步，如果还是数字，说明有 max 值
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) maxSize = std::stod(tokens[++i]);
-                
+                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) currentStmt.minSize = std::stod(tokens[++i]);
+                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) currentStmt.maxSize = std::stod(tokens[++i]);
             } else if (t == "PARALLEL") {
-                hasParallel = true;
-                // 注意：在分支B中是 PARALLEL parLength; 在分支C中是 PARALLEL parWithin LENGTH length
-                if (branchType == RuleBranch::CONVEX) {
-                    if (i + 1 < tokens.size() && isNumber(tokens[i+1])) convexParWithin = std::stod(tokens[++i]);
-                } else {
-                    if (i + 1 < tokens.size() && isNumber(tokens[i+1])) parallelLength = std::stod(tokens[++i]);
+                currentStmt.hasParallel = true;
+                if (currentStmt.branchType == RuleBranch::CONVEX && i + 1 < tokens.size() && isNumber(tokens[i+1])) {
+                    currentStmt.convexParWithin = std::stod(tokens[++i]);
+                } else if (i + 1 < tokens.size() && isNumber(tokens[i+1])) {
+                    currentStmt.parallelLength = std::stod(tokens[++i]);
                 }
             } else if (t == "WITHIN") {
+                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) currentStmt.minWithin = std::stod(tokens[++i]);
                 if (i + 1 < tokens.size() && isNumber(tokens[i+1])) {
-                    minWithin = std::stod(tokens[++i]);
-                }
-                // 向前看判断是单值区间 (WITHIN parWithin) 还是双值区间 (WITHIN min max)
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) {
-                    maxWithin = std::stod(tokens[++i]);
+                    currentStmt.maxWithin = std::stod(tokens[++i]);
                 } else {
-                    // 若只有一个值，那它实际上是 maxWithin 限制 (即距离 < parWithin)
-                    maxWithin = minWithin;
-                    minWithin = 0.0;
+                    currentStmt.maxWithin = currentStmt.minWithin;
+                    currentStmt.minWithin = 0.0;
                 }
-            } else if (t == "EXCEPTEXTRACUT") {
-                hasExceptExtraCut = true;
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) extraCutWithin = std::stod(tokens[++i]);
-            } else if (t == "EXCEPTTWOEDGES") {
-                hasExceptTwoEdges = true;
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) exceptTwoEdgesWithin = std::stod(tokens[++i]);
             }
-            // -- 分支 C 解析 --
+            // 分支 C
             else if (t == "CONVEXCORNERS") {
-                branchType = RuleBranch::CONVEX;
-                hasConvexCorners = true;
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) convexLength = std::stod(tokens[++i]);
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) adjacentLength = std::stod(tokens[++i]);
-            } else if (t == "LENGTH") {
-                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) convexParLength = std::stod(tokens[++i]);
+                currentStmt.branchType = RuleBranch::CONVEX;
+                currentStmt.hasConvexCorners = true;
+                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) currentStmt.convexLength = std::stod(tokens[++i]);
+                if (i + 1 < tokens.size() && isNumber(tokens[i+1])) currentStmt.adjacentLength = std::stod(tokens[++i]);
             }
         }
-        return true;
+        return !statements.empty();
     }
 
     // ==========================================
     // 3. DRC 引擎读取校验接口 (Checker Mock)
     // ==========================================
-    // 后续在别的地方获取到这个 rule 后，调用此方法检查是否违规
-    bool isOverhangRequired(double wireSize, double parallelDist, double parallelOverlap, bool hasSharedCut) const {
-        // 第一关过滤：如果没有进入分支B，这里不写复杂逻辑
-        if (branchType != RuleBranch::PROXIMITY) return false;
-
-        // 检查尺寸触发
-        bool sizeTriggered = (wireSize >= minSize) && (maxSize == -1.0 || wireSize < maxSize);
-        if (!sizeTriggered) return false;
-
-        // 检查距离与重叠长度
-        bool distTriggered = (parallelDist >= minWithin && parallelDist < maxWithin);
-        bool overlapTriggered = (parallelOverlap >= parallelLength);
-
-        if (distTriggered && overlapTriggered) {
-            // 检查是否有豁免
-            if (hasExceptExtraCut && hasSharedCut /* 且在 extraCutWithin 范围内 */) {
-                return false; // 被多孔规则豁免
+    // 外部调用时，会遍历整个序列，看当前物理状态命中了哪一条语句
+    bool checkViolation(double wireSize, double neighborDist, double parallelOverlap) const {
+        for (const auto& stmt : statements) {
+            // 这里仅以检查分支 B 为例
+            if (stmt.branchType == RuleBranch::PROXIMITY) {
+                bool sizeOk = (wireSize >= stmt.minSize) && (stmt.maxSize == -1.0 || wireSize < stmt.maxSize);
+                bool distOk = (neighborDist >= stmt.minWithin && neighborDist < stmt.maxWithin);
+                bool overlapOk = (parallelOverlap >= stmt.parallelLength);
+                
+                // 如果命中了序列中的任意一条触发条件
+                if (sizeOk && distOk && overlapOk) {
+                    return true; // 强制要求严格的 overhang
+                }
             }
-            return true; // 强制触发！
         }
         return false;
     }
 
-    // 调试打印工具
-    void debugPrint() const {
-        std::cout << "--- 规则解析结果 ---\n";
-        std::cout << "Cut Class: " << (cutClass.empty() ? "NONE" : cutClass) << "\n";
-        std::cout << "Overhang: " << overhang << "\n";
-        
-        if (branchType == RuleBranch::PROXIMITY) {
-            std::cout << "Branch: PROXIMITY (邻域干涉)\n";
-            std::cout << "Size Range: [" << minSize << ", " << (maxSize == -1 ? "INF" : std::to_string(maxSize)) << ")\n";
-            std::cout << "Distance WITHIN: [" << minWithin << ", " << maxWithin << ")\n";
-            std::cout << "EXCEPTEXTRACUT Allowed: " << (hasExceptExtraCut ? "YES" : "NO") << "\n";
-        }
-        std::cout << "--------------------\n";
-    }
-
 private:
-    // 工具方法：判断字符串是否代表数字
     bool isNumber(const std::string& str) const {
         if (str.empty()) return false;
         char c = str[0];
@@ -229,33 +205,27 @@ private:
 // 4. 使用示例 (Usage Example)
 // ==========================================
 int main() {
-    // 假设你从 LEF 文件中按空格拆分出了这样一个 vector
-    std::vector<std::string> ruleStrs = {
+    // 模拟你解析出来的 strs，注意这里面包含了 两个 ENCLOSUREEDGE 语句（序列）！
+    std::vector<std::string> myStrs = {
+        // 第一条语句 (针对 VIA12_LONG)
         "ENCLOSUREEDGE", "CUTCLASS", "VIA12_LONG", "ABOVE", "0.045",
-        "SPANLENGTH", "0.1", "0.3",
-        "PARALLEL", "0.05",
-        "WITHIN", "0.02", "0.08",
-        "EXCEPTEXTRACUT", "0.06"
+        "SPANLENGTH", "0.1", "0.3", "PARALLEL", "0.05", "WITHIN", "0.02", "0.08", ";",
+        
+        // 第二条语句 (针对普通 VIA)
+        "ENCLOSUREEDGE", "ABOVE", "0.02",
+        "WIDTH", "0.05", "0.1", "PARALLEL", "0.03", "WITHIN", "0.05", ";"
     };
 
-    // 1. 创建对象并存入信息
-    Lef58EnclosureEdgeRule myRule;
-    if (myRule.buildFromTokens(ruleStrs)) {
-        std::cout << "规则解析成功！\n";
+    Lef58EnclosureEdgeProperty enclosureProperty;
+    
+    // 解析并存入信息
+    if (enclosureProperty.parseTokens(myStrs)) {
+        std::cout << "解析成功！共加载了 " << enclosureProperty.statements.size() << " 条规则序列。\n";
     }
 
-    // 2. 打印看看类里存入了什么
-    myRule.debugPrint();
-
-    // 3. 在别的地方进行 Check (模拟物理设计验证)
-    double targetWireSize = 0.15;    // 金属跨长0.15 (落入0.1-0.3区间)
-    double neighborDist = 0.05;      // 邻居距离0.05 (落入0.02-0.08区间)
-    double neighborOverlap = 0.10;   // 平行重叠0.10 (大于阈值0.05)
-    bool hasSharedCutNearby = false; // 附近没有别的孔
-
-    bool needStrictOverhang = myRule.isOverhangRequired(targetWireSize, neighborDist, neighborOverlap, hasSharedCutNearby);
-    
-    std::cout << "DRC 判定: " << (needStrictOverhang ? "违规，需要严格包围量！" : "通过，使用普通包围量。") << "\n";
+    // 物理设计验证
+    bool isViolated = enclosureProperty.checkViolation(0.15, 0.05, 0.10);
+    std::cout << "DRC 判定: " << (isViolated ? "触发严格约束" : "安全") << "\n";
 
     return 0;
 }
